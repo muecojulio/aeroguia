@@ -12,7 +12,7 @@ export default function PrivacidadPage() {
       <h1>Política de privacidad</h1>
       <p className="muted">Última actualización: 25 de septiembre de 2026. Documento informativo; no es asesoría legal.</p>
       <h2>Qué es esta app</h2>
-      <p>AeroGuía es una gía de aeropuertos que funciona en el navegador. No crea cuentas ni pide correo.</p>
+      <p>AeroGuía es una guía de aeropuertos que funciona en el navegador. No crea cuentas ni pide correo.</p>
       <h2>Datos que se usan en el dispositivo</h2>
       <ul>
         <li>Ubicación GPS, solo si pulsas «Partida con GPS». El permiso lo concede el navegador.</li>
