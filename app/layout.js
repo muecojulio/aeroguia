@@ -33,7 +33,6 @@ export default function RootLayout({ children }) {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="AeroGuía" />
         <link rel="apple-touch-icon" href="/icon-180.png" />
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossOrigin="" />
       </head>
       <body>{children}</body>
     </html>

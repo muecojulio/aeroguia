@@ -1,4 +1,4 @@
-const CACHE = "aeroguia-v4";
+const CACHE = "aeroguia-v5";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

@@ -71,8 +71,14 @@ export default function AppClient() {
     Promise.all([
       fetch("/data/airports.json").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch("/api/airports").then((r) => (r.ok ? r.json() : [])).catch(() => [])
-    ]).then(([single, remote]) => {
-      const list = Array.isArray(single) && single.length ? single : remote || [];
+    ]).then(([seed, remote]) => {
+      const local = Array.isArray(seed) ? seed : [];
+      const online = Array.isArray(remote) ? remote : [];
+      const byIata = new Map();
+      for (const a of online) if (a?.iata) byIata.set(a.iata, a);
+      // El dataset local está curado (tipo large/medium y país verificados), así que gana empates.
+      for (const a of local) if (a?.iata) byIata.set(a.iata, a);
+      const list = [...byIata.values()];
       buildAirportIndex(list);
       setAirports(list);
       setAirport(list.find((x) => x.iata === "HND") || list[0]);

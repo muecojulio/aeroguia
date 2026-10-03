@@ -8,8 +8,8 @@ Requiere **Node.js 24.x** (`engines` en `package.json`).
 
 Sin key (siguen activas):
 
-- Mapas: [Leaflet](https://github.com/Leaflet/Leaflet) + teselas de OpenStreetMap
-- Lista de aeropuertos: datos OurAirports de dominio público (`public/data/airports.json`)
+- Mapas: [Leaflet](https://github.com/Leaflet/Leaflet) (CSS incluido desde el paquete npm) + teselas de OpenStreetMap
+- Lista de aeropuertos: semilla estática `public/data/airports.json` (~950 aeropuertos curados de datos OurAirports de dominio público) que se fusiona en el cliente con la lista completa de `/api/airports`
 - Nombre del punto marcado: Nominatim OSM
 - Aviones en vivo: OpenSky Network
 - Rutas a pie y en carro: OSRM público ([Project-OSRM/osrm-backend](https://github.com/Project-OSRM/osrm-backend))
