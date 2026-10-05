@@ -18,8 +18,7 @@ export const metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Sin maximumScale ni userScalable:false: no bloqueamos el zoom.
   viewportFit: "cover",
   themeColor: "#071526"
 };

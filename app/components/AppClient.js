@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { COUNTRY_FLAG } from "../../lib/countries";
 import { categoryMeta, poisForAirport } from "../../lib/hubs";
 import { nearestAirports } from "../../lib/geo";
 import { buildAirportIndex } from "../../lib/airportsIndex";
+import { foldText } from "../../lib/text";
 import { HomeTab, FlightsTab, NavTab, WeatherLine, NearbyList } from "./tabs";
+import AirportCombobox from "./AirportCombobox";
+import { Rail, useSwipeNav } from "./interactions";
 
 const MapView = dynamic(() => import("./MapView"), { ssr: false });
 
@@ -44,6 +47,15 @@ export default function AppClient() {
   const [iosTip, setIosTip] = useState(false);
   const [weather, setWeather] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(true);
+  // Estados de interacción (feedback de la interfaz, sin tocar la lógica).
+  const [comboOpen, setComboOpen] = useState(false);
+  const [dir, setDir] = useState(1);
+  const [leaving, setLeaving] = useState(null);
+  const [loadingSky, setLoadingSky] = useState(false);
+  const [skyFlash, setSkyFlash] = useState(false);
+  const [geoPending, setGeoPending] = useState(false);
+  const [routing, setRouting] = useState(false);
+  const leaveTimer = useRef(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -55,6 +67,8 @@ export default function AppClient() {
     window.addEventListener("appinstalled", () => { setInstalled(true); setInstallEvent(null); });
     return () => window.removeEventListener("beforeinstallprompt", onPrompt);
   }, []);
+
+  useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
   async function installApp() {
     if (installEvent) {
@@ -93,14 +107,15 @@ export default function AppClient() {
   }, [origin, airport, airports]);
 
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    // La búsqueda ignora mayúsculas y diacríticos («jose» encuentra «José»).
+    const q = foldText(query.trim());
     const pool = country === "ALL" ? airports : airports.filter((a) => a.country === country);
     const filtered = pool.filter((a) => {
       if (!q) {
         if (country === "MX" || country === "US" || country === "JP") return true;
         return a.type === "large" || QUICK.includes(a.iata);
       }
-      return a.iata.toLowerCase().includes(q) || (a.icao || "").toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || (a.city || "").toLowerCase().includes(q);
+      return foldText(a.iata).includes(q) || foldText(a.icao || "").includes(q) || foldText(a.name).includes(q) || foldText(a.city || "").includes(q);
     });
     filtered.sort((a, b) => {
       const rank = (x) => (x.type === "large" ? 0 : 1);
@@ -111,8 +126,48 @@ export default function AppClient() {
     return filtered.slice(0, q ? 80 : country === "ALL" ? 24 : 120);
   }, [airports, query, country]);
 
+  /* ---------------- cambio de sección (pestañas + swipe) ---------------- */
+
+  function changeTab(id) {
+    if (id === tab) return;
+    const from = TABS.findIndex((t) => t.id === tab);
+    const to = TABS.findIndex((t) => t.id === id);
+    setDir(to >= from ? 1 : -1);
+    setLeaving(tab);
+    setTab(id);
+    setComboOpen(false);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => setLeaving(null), 260);
+  }
+
+  function onTabListKeyDown(e) {
+    const i = TABS.findIndex((t) => t.id === tab);
+    let n = -1;
+    if (e.key === "ArrowRight") n = (i + 1) % TABS.length;
+    else if (e.key === "ArrowLeft") n = (i - 1 + TABS.length) % TABS.length;
+    else if (e.key === "Home") n = 0;
+    else if (e.key === "End") n = TABS.length - 1;
+    if (n < 0) return;
+    e.preventDefault();
+    changeTab(TABS[n].id);
+    const btn = document.getElementById(`tab-${TABS[n].id}`);
+    if (btn) btn.focus();
+  }
+
+  const swipeHandlers = useSwipeNav({
+    disabled: comboOpen,
+    onSwipe: (direction) => {
+      const i = TABS.findIndex((t) => t.id === tab);
+      const n = direction === "next" ? i + 1 : i - 1;
+      if (n < 0 || n >= TABS.length) return;
+      changeTab(TABS[n].id);
+    }
+  });
+
+  /* ---------------- acciones ---------------- */
+
   function selectAirport(a) {
-    setAirport(a); setDestination(null); setRoute(null); setArrive(null); setFilter("all"); setPickingOrigin(false); setSheetOpen(true); setTab("mapa");
+    setAirport(a); setDestination(null); setRoute(null); setArrive(null); setFilter("all"); setPickingOrigin(false); setSheetOpen(true); changeTab("mapa");
   }
   function applyOrigin(point, extraMsg) {
     setOrigin(point); setPickingOrigin(false); setGeoMsg(extraMsg || `Punto de partida: ${point.name}`);
@@ -123,22 +178,26 @@ export default function AppClient() {
   }
   function setOriginGps() {
     if (typeof window === "undefined") return;
+    if (geoPending) return;
     if (!window.isSecureContext) { setGeoMsg("El GPS solo funciona en HTTPS o en localhost."); return; }
     if (!navigator.geolocation) { setGeoMsg("Este dispositivo no permite ubicación."); return; }
     setPickingOrigin(false);
+    setGeoPending(true);
     setGeoMsg("Pidiendo permiso de ubicación…");
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const lat = pos.coords.latitude; const lon = pos.coords.longitude;
       let name = "Mi ubicación (GPS)";
       try { const res = await fetch(`/api/lugar?lat=${lat}&lon=${lon}`); const data = await res.json(); if (data?.name) name = data.name; } catch {}
       applyOrigin({ lat, lon, name, source: "gps" }, "Punto de partida: tu GPS.");
+      setGeoPending(false);
     }, (err) => {
       const map = { 1: "Permiso de ubicación denegado. Actívalo en el navegador.", 2: "No pude leer el GPS. Revisa que la ubicación esté encendida.", 3: "Se agotó el tiempo de espera del GPS. Inténtalo otra vez." };
       setGeoMsg(map[err.code] || "No pude leer el GPS.");
+      setGeoPending(false);
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
   }
   function startPickOrigin() {
-    setPickingOrigin(true); setSheetOpen(true); setGeoMsg("Toca el mapa o un aeropuerto para marcar el punto de partida."); setTab("mapa");
+    setPickingOrigin(true); setSheetOpen(true); setGeoMsg("Toca el mapa o un aeropuerto para marcar el punto de partida."); changeTab("mapa");
   }
   async function onPickOrigin(point) {
     let named = point;
@@ -151,8 +210,10 @@ export default function AppClient() {
     applyOrigin({ lat: p.lat, lon: p.lon, name: p.name, source: "poi" }, `Salida: ${p.name}`);
   }
   async function buildRoute(dest) {
-    if (!origin) { setRouteErr("Primero elige un punto de partida (GPS, mapa o aeropuerto)."); setTab("navegar"); return; }
-    setDestination(dest); setRouteErr("Calculando ruta a pie y en carro…"); setArrive(null); setTab("navegar");
+    if (!origin) { setRouteErr("Primero elige un punto de partida (GPS, mapa o aeropuerto)."); changeTab("navegar"); return; }
+    if (routing) return;
+    setRouting(true);
+    setDestination(dest); setRouteErr("Calculando ruta a pie y en carro…"); setArrive(null); changeTab("navegar");
     const params = new URLSearchParams({ fromLat: String(origin.lat), fromLon: String(origin.lon), toLat: String(dest.lat), toLon: String(dest.lon), dest: dest.name || "destino" });
     try {
       const res = await fetch(`/api/llegar?${params}`);
@@ -163,6 +224,7 @@ export default function AppClient() {
       setRoute(chosen && !chosen.error ? chosen : null);
       setRouteErr(chosen?.error || "");
     } catch { setRouteErr("Error de red al calcular cómo llegar."); }
+    finally { setRouting(false); }
   }
   useEffect(() => {
     if (!arrive) return;
@@ -170,13 +232,28 @@ export default function AppClient() {
     if (chosen && !chosen.error) { setRoute(chosen); setRouteErr(""); }
   }, [routeMode, arrive]);
   async function loadSky() {
-    if (!airport) return;
-    const pad = 0.6;
-    const params = new URLSearchParams({ lamin: String(airport.lat - pad), lomin: String(airport.lon - pad), lamax: String(airport.lat + pad), lomax: String(airport.lon + pad) });
-    const res = await fetch(`/api/flights?${params}`);
-    const data = await res.json();
-    setFlights(data.flights || []);
-    setFlightWarn(data.warning || "");
+    if (!airport) return false;
+    setLoadingSky(true);
+    try {
+      const pad = 0.6;
+      const params = new URLSearchParams({ lamin: String(airport.lat - pad), lomin: String(airport.lon - pad), lamax: String(airport.lat + pad), lomax: String(airport.lon + pad) });
+      const res = await fetch(`/api/flights?${params}`);
+      const data = await res.json();
+      setFlights(data.flights || []);
+      setFlightWarn(data.warning || "");
+      return !data.warning;
+    } catch {
+      setFlightWarn("No se pudo actualizar la lista de aviones.");
+      return false;
+    } finally {
+      setLoadingSky(false);
+    }
+  }
+  async function reloadSky() {
+    const ok = await loadSky();
+    if (!ok) return;
+    setSkyFlash(true);
+    setTimeout(() => setSkyFlash(false), 1600);
   }
   useEffect(() => { if (!airport) return; loadSky(); const id = setInterval(loadSky, 45000); return () => clearInterval(id); }, [airport?.iata]);
   useEffect(() => {
@@ -186,11 +263,16 @@ export default function AppClient() {
   }, [airport?.iata, airport?.lat, airport?.lon]);
   async function lookupFlight(e) {
     e.preventDefault();
-    if (!flightQuery.trim()) return;
+    if (!flightQuery.trim() || loadingFlight) return;
     setLoadingFlight(true);
-    const res = await fetch(`/api/vuelo?q=${encodeURIComponent(flightQuery.trim())}`);
-    setFlightInfo(await res.json());
-    setLoadingFlight(false);
+    try {
+      const res = await fetch(`/api/vuelo?q=${encodeURIComponent(flightQuery.trim())}`);
+      setFlightInfo(await res.json());
+    } catch {
+      setFlightInfo({ error: "Sin conexión para consultar el vuelo. Reinténtalo." });
+    } finally {
+      setLoadingFlight(false);
+    }
   }
   const cats = categoryMeta();
   const counts = useMemo(() => {
@@ -199,50 +281,132 @@ export default function AppClient() {
     return c;
   }, [airports]);
 
+  /* ---------------- paneles ---------------- */
+
+  function screenFor(id) {
+    if (id === "inicio") {
+      return (
+        <main className="screen">
+          <HomeTab country={country} setCountry={setCountry} results={results} airports={airports} query={query} onSelect={selectAirport} airport={airport} installed={installed} installApp={installApp} iosTip={iosTip} weather={weather} counts={counts} />
+        </main>
+      );
+    }
+    if (!airport) return null;
+    if (id === "mapa") {
+      return (
+        <main className="screen map-screen">
+          <div className="map-full"><MapView airport={airport} pois={pois} filter={filter} origin={origin} destination={destination} routeGeo={route?.geometry} flights={flights} nearbyAirports={nearbyFromFocus} pickingOrigin={pickingOrigin} onPickOrigin={onPickOrigin} onPickAirport={setOriginFromAirport} /></div>
+          <Rail label="Filtros de categorías del mapa" className="map-float" wrapClassName="map-float-wrap" scrollTo={filter}>
+            <button type="button" data-key="all" className={`filter ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>Todo</button>
+            {Object.entries(cats).map(([key, meta]) => (
+              <button type="button" key={key} data-key={key} className={`filter ${filter === key ? "on" : ""}`} aria-pressed={filter === key} onClick={() => setFilter(key)}>{meta.emoji} {meta.label}</button>
+            ))}
+          </Rail>
+          {pickingOrigin && <div className="banner-pick" role="status">Toca el mapa o un código IATA para el punto de partida</div>}
+          <div className={`map-sheet ${sheetOpen ? "open" : "min"}`} id="map-sheet-panel">
+            <button type="button" className="sheet-handle" onClick={() => setSheetOpen((v) => !v)} aria-expanded={sheetOpen} aria-controls="map-sheet-panel"><span aria-hidden="true" />{sheetOpen ? "Ocultar panel" : "Mostrar panel"}</button>
+            <div className="sheet-body" inert={!sheetOpen}>
+              <p className="kicker">{COUNTRY_FLAG[airport.country]} {airport.iata}</p>
+              <h3>{airport.name}</h3>
+              <p className="muted">{airport.city || "—"}</p>
+              <WeatherLine weather={weather} compact />
+              <div className="btn-row sticky-actions">
+                <button type="button" className="btn teal" onClick={setOriginGps} aria-busy={geoPending} disabled={geoPending}>
+                  {geoPending ? <><span className="spinner" aria-hidden="true" /> Localizando…</> : "Partida con GPS"}
+                </button>
+                <button type="button" className="btn primary" onClick={startPickOrigin}>Elegir punto de partida</button>
+              </div>
+              {origin && <p className="status ok" role="status">Inicio: {origin.name}</p>}
+              {geoMsg && <p className="status info" role="status">{geoMsg}</p>}
+              <NearbyList title="Aeropuertos cerca del punto" items={nearbyFromFocus} onPick={setOriginFromAirport} />
+            </div>
+          </div>
+        </main>
+      );
+    }
+    if (id === "vuelos") {
+      return (
+        <main className="screen">
+          <FlightsTab airport={airport} flights={flights} flightWarn={flightWarn} flightQuery={flightQuery} setFlightQuery={setFlightQuery} lookupFlight={lookupFlight} flightInfo={flightInfo} loadingFlight={loadingFlight} reload={reloadSky} loadingSky={loadingSky} skyFlash={skyFlash} />
+        </main>
+      );
+    }
+    if (id === "navegar") {
+      return (
+        <main className="screen">
+          <NavTab airport={airport} pois={pois} origin={origin} setOriginGps={setOriginGps} startPickOrigin={startPickOrigin} setOriginFromPoi={setOriginFromPoi} geoMsg={geoMsg} destination={destination} route={route} routeErr={routeErr} routeMode={routeMode} setRouteMode={setRouteMode} buildRoute={buildRoute} nearby={nearbyFromFocus} setOriginFromAirport={setOriginFromAirport} arrive={arrive} geoPending={geoPending} routing={routing} />
+        </main>
+      );
+    }
+    return null;
+  }
+
+  const current = screenFor(tab);
+  const prev = leaving ? screenFor(leaving) : null;
+  const activeIndex = Math.max(0, TABS.findIndex((t) => t.id === tab));
+
   return (
     <div className="shell">
       {tab !== "mapa" && (
         <header className="topbar">
           <div className="topbar-row">
-            <div className="brand"><div className="mark">✈</div><div><h1>AeroGuía</h1><small>App de aeropuerto</small></div></div>
+            <div className="brand"><div className="mark" aria-hidden="true">✈</div><div><h1>AeroGuía</h1><small>App de aeropuerto</small></div></div>
             {airport && <span className="chip">{COUNTRY_FLAG[airport.country]} {airport.iata}</span>}
           </div>
-          <form className="search" onSubmit={(e) => { e.preventDefault(); if (results[0]) selectAirport(results[0]); }}>
-            <input value={query} onChange={(e) => { setQuery(e.target.value); setTab("inicio"); }} placeholder="Aeropuerto, ciudad o código" />
-            <button type="submit">Buscar</button>
-          </form>
+          <AirportCombobox
+            value={query}
+            onChange={(v) => { setQuery(v); changeTab("inicio"); }}
+            results={results}
+            onSelect={selectAirport}
+            onSubmit={() => { if (results[0]) selectAirport(results[0]); }}
+            selectedKey={airport?.iata}
+            ready={airports.length > 0}
+            open={comboOpen}
+            setOpen={setComboOpen}
+          />
         </header>
       )}
-      {tab === "inicio" && <main className="screen"><HomeTab country={country} setCountry={setCountry} results={results} airports={airports} query={query} onSelect={selectAirport} airport={airport} installed={installed} installApp={installApp} iosTip={iosTip} weather={weather} counts={counts} /></main>}
-      {tab === "mapa" && airport && (
-        <main className="screen map-screen">
-          <div className="map-full"><MapView airport={airport} pois={pois} filter={filter} origin={origin} destination={destination} routeGeo={route?.geometry} flights={flights} nearbyAirports={nearbyFromFocus} pickingOrigin={pickingOrigin} onPickOrigin={onPickOrigin} onPickAirport={setOriginFromAirport} /></div>
-          <div className="map-chrome map-float">
-            <button type="button" className={`filter ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>Todo</button>
-            {Object.entries(cats).map(([key, meta]) => (
-              <button type="button" key={key} className={`filter ${filter === key ? "on" : ""}`} onClick={() => setFilter(key)}>{meta.emoji} {meta.label}</button>
-            ))}
-          </div>
-          {pickingOrigin && <div className="banner-pick">Toca el mapa o un código IATA para el punto de partida</div>}
-          <div className={`map-sheet ${sheetOpen ? "open" : "min"}`}>
-            <button type="button" className="sheet-handle" onClick={() => setSheetOpen((v) => !v)} aria-expanded={sheetOpen}><span />{sheetOpen ? "Ocultar panel" : "Mostrar panel"}</button>
-            <p className="kicker">{COUNTRY_FLAG[airport.country]} {airport.iata}</p>
-            <h3>{airport.name}</h3>
-            <p className="muted">{airport.city || "—"}</p>
-            <WeatherLine weather={weather} compact />
-            <div className="btn-row sticky-actions">
-              <button type="button" className="btn teal" onClick={setOriginGps}>Partida con GPS</button>
-              <button type="button" className="btn primary" onClick={startPickOrigin}>Elegir punto de partida</button>
-            </div>
-            {origin && <p className="status ok">Inicio: {origin.name}</p>}
-            {geoMsg && <p className="status info">{geoMsg}</p>}
-            <NearbyList title="Aeropuertos cerca del punto" items={nearbyFromFocus} onPick={setOriginFromAirport} />
-          </div>
-        </main>
-      )}
-      {tab === "vuelos" && airport && <main className="screen"><FlightsTab airport={airport} flights={flights} flightWarn={flightWarn} flightQuery={flightQuery} setFlightQuery={setFlightQuery} lookupFlight={lookupFlight} flightInfo={flightInfo} loadingFlight={loadingFlight} reload={loadSky} /></main>}
-      {tab === "navegar" && airport && <main className="screen"><NavTab airport={airport} pois={pois} origin={origin} setOriginGps={setOriginGps} startPickOrigin={startPickOrigin} setOriginFromPoi={setOriginFromPoi} geoMsg={geoMsg} destination={destination} route={route} routeErr={routeErr} routeMode={routeMode} setRouteMode={setRouteMode} buildRoute={buildRoute} nearby={nearbyFromFocus} setOriginFromAirport={setOriginFromAirport} arrive={arrive} /></main>}
-      <nav className="tabs">{TABS.map((t) => (<button key={t.id} type="button" className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}><strong>{t.icon}</strong><span>{t.label}</span></button>))}</nav>
+
+      <nav className="tabs" aria-label="Navegación principal">
+        <div className="tabs-list" role="tablist" aria-label="Secciones" aria-orientation="horizontal" onKeyDown={onTabListKeyDown}>
+          <span className="tabs-indicator" aria-hidden="true" style={{ "--i": String(activeIndex) }} />
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              id={`tab-${t.id}`}
+              role="tab"
+              className="tab"
+              aria-selected={tab === t.id}
+              aria-controls={`panel-${t.id}`}
+              tabIndex={tab === t.id ? 0 : -1}
+              onClick={() => changeTab(t.id)}
+            >
+              <strong aria-hidden="true">{t.icon}</strong>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div className="panels" {...swipeHandlers}>
+        {prev && cloneElement(prev, {
+          key: `leave-${leaving}`,
+          className: `${prev.props.className || ""} panel leave`,
+          id: undefined,
+          "aria-hidden": true,
+          inert: true,
+          style: { "--dir": String(dir) }
+        })}
+        {current && cloneElement(current, {
+          key: `cur-${tab}`,
+          className: `${current.props.className || ""} panel enter`,
+          id: `panel-${tab}`,
+          role: "tabpanel",
+          "aria-labelledby": `tab-${tab}`,
+          style: { "--dir": String(dir) }
+        })}
+      </div>
     </div>
   );
 }
