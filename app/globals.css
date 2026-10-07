@@ -72,11 +72,11 @@ button,a,input,select,textarea,[role="tab"],[role="radio"],[role="switch"],[role
 .screen.map-screen { padding:0 0 var(--tab-h); overflow:hidden; }
 
 .tabs { position:fixed; left:0; right:0; bottom:0; height:calc(var(--tab-h) + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); background:rgba(255,255,255,.94); border-top:1px solid var(--line); z-index:40; }
-.tabs-list { position:relative; display:grid; grid-template-columns:repeat(4,1fr); height:100%; }
-/* Píldora deslizante hacia la pestaña activa. */
-.tabs-indicator { position:absolute; top:7px; bottom:7px; left:calc(var(--i,0) * 25% + 6px); width:calc(25% - 12px); background:#e8f1ff; border-radius:14px; transition:left 260ms var(--ease); pointer-events:none; }
-.tab { position:relative; z-index:1; border:0; background:transparent; color:#8a97a8; min-height:48px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; transition:color 160ms ease, transform var(--dur-fast) var(--ease); }
-.tab strong { display:block; font-size:18px; line-height:1.1; } .tab span { display:block; font-size:11px; font-weight:700; }
+.tabs-list { position:relative; display:grid; grid-template-columns:repeat(var(--n,6),1fr); height:100%; }
+/* Píldora deslizante hacia la pestaña activa (--n = número de pestañas). */
+.tabs-indicator { position:absolute; top:7px; bottom:7px; left:calc(var(--i,0) * (100% / var(--n,6)) + 4px); width:calc((100% / var(--n,6)) - 8px); background:#e8f1ff; border-radius:14px; transition:left 260ms var(--ease); pointer-events:none; }
+.tab { position:relative; z-index:1; border:0; background:transparent; color:#8a97a8; min-height:48px; padding:0 2px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; transition:color 160ms ease, transform var(--dur-fast) var(--ease); }
+.tab strong { display:block; font-size:16px; line-height:1.1; } .tab span { display:block; font-size:10px; font-weight:700; letter-spacing:-.1px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tab[aria-selected="true"] { color:var(--navy); }
 .tab:active { transform:scale(.93); transition-duration:60ms; }
 
@@ -228,6 +228,20 @@ h2,h3 { margin:0 0 6px; } .muted { color:var(--muted); margin:0; }
 /* --------------------------------- legal -------------------------------- */
 .legal { min-height:100dvh; overflow:auto; background:#f3f6fa; padding:24px 18px 80px; max-width:720px; margin:0 auto; }
 .legal a { color:var(--sky); display:inline-block; padding:8px 0; }
+/* Privacidad dentro de la app: la sección es una tarjeta, sin fondo propio. */
+.legal-embed h1 { font-size:22px; margin:0 0 6px; }
+.legal-embed h2 { font-size:15px; margin:14px 0 4px; }
+.legal-embed p { margin:0 0 8px; }
+.legal-embed ul { margin:6px 0 10px; padding-left:20px; color:var(--muted); }
+.legal-embed li { margin:4px 0; }
+
+/* --------------------- lista de ventajas / pasos ------------------------ */
+.plain, .steps-plain { list-style:none; margin:8px 0 0; padding:0; }
+.plain li { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+.plain li:last-child { border-bottom:0; }
+.steps-plain > div { display:grid; grid-template-columns:26px 1fr; gap:8px; align-items:start; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
+.steps-plain > div:last-child { border-bottom:0; }
+.steps-plain p { margin:0; }
 .airport-pill { background:#eef4ff; }
 
 /* --------------------- movimiento reducido ------------------------------ */
