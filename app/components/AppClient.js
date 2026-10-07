@@ -317,8 +317,7 @@ export default function AppClient() {
     if (id === "mapa") {
       return (
         <main className="screen map-screen">
-          <div className="map-full"><MapView airport={airport} pois={pois} filter={filter} origin={origin} destination={destination} routeGeo={route?.geometry} flights={flights} nearbyAirports={nearbyFromFocus} pickingOrigin={pickingOrigin} onPickOrigin={onPickOrigin} onPickAirport={setOriginFromAirport} /></div>
-          <Rail label="Filtros de categorías del mapa" className="map-float" wrapClassName="map-float-wrap" scrollTo={filter}>
+          <div className="map-full"><MapView airport={airport} pois={pois} filter={filter} origin={origin} destination={destination} routeGeo={route?.geometry} flights={flights} nearbyAirports={nearbyFromFocus} pickingOrigin={pickingOrigin} onPickOrigin={onPickOrigin} onPickAirport={setOriginFromAirport} visible={mapVisible} /></div>          <Rail label="Filtros de categorías del mapa" className="map-float" wrapClassName="map-float-wrap" scrollTo={filter}>
             <button type="button" data-key="all" className={`filter ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>Todo</button>
             {Object.entries(cats).map(([key, meta]) => (
               <button type="button" key={key} data-key={key} className={`filter ${filter === key ? "on" : ""}`} aria-pressed={filter === key} onClick={() => setFilter(key)}>{meta.emoji} {meta.label}</button>
@@ -363,8 +362,24 @@ export default function AppClient() {
     return null;
   }
 
-  const current = screenFor(tab);
-  const prev = leaving ? screenFor(leaving) : null;
+  /* El panel del mapa vive siempre montado con clave estable: al cambiar de
+     pestaña NO se destruye. Se oculta con CSS (display:none) y Leaflet
+     recalcula su tamaño al volver (prop `visible`). Así el mapa no parpadea
+     en gris ni se pierde la posición/zoom del usuario. */
+  const mapActive = tab === "mapa";
+  const mapVisible = mapActive || leaving === "mapa";
+  const mapScreen = airport ? screenFor("mapa") : null;
+  const current = tab === "mapa" ? null : screenFor(tab);
+  const prev = !leaving || leaving === "mapa" ? null : screenFor(leaving);
+  const mapCls =
+    "screen map-screen panel" +
+    (mapActive
+      ? leaving && leaving !== "mapa"
+        ? " enter"
+        : ""
+      : leaving === "mapa"
+        ? " leave"
+        : " off");
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.id === tab));
 
   return (
@@ -412,6 +427,16 @@ export default function AppClient() {
       </nav>
 
       <div className="panels" {...swipeHandlers}>
+        {mapScreen && cloneElement(mapScreen, {
+          key: "mapa",
+          className: mapCls,
+          id: "panel-mapa",
+          role: "tabpanel",
+          "aria-labelledby": "tab-mapa",
+          "aria-hidden": mapActive ? undefined : true,
+          inert: !mapActive ? true : undefined,
+          style: { "--dir": String(dir) }
+        })}
         {prev && cloneElement(prev, {
           key: `leave-${leaving}`,
           className: `${prev.props.className || ""} panel leave`,
