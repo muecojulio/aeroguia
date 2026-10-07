@@ -7,7 +7,7 @@ import { categoryMeta, poisForAirport } from "../../lib/hubs";
 import { nearestAirports } from "../../lib/geo";
 import { buildAirportIndex } from "../../lib/airportsIndex";
 import { foldText } from "../../lib/text";
-import { HomeTab, FlightsTab, NavTab, WeatherLine, NearbyList } from "./tabs";
+import { HomeTab, FlightsTab, NavTab, WeatherLine, NearbyList, InstallTab, PrivacyTab } from "./tabs";
 import AirportCombobox from "./AirportCombobox";
 import { Rail, useSwipeNav } from "./interactions";
 
@@ -17,8 +17,15 @@ const TABS = [
   { id: "inicio", icon: "🏠", label: "Inicio" },
   { id: "mapa", icon: "🗺️", label: "Mapa" },
   { id: "vuelos", icon: "✈️", label: "Vuelos" },
-  { id: "navegar", icon: "🧭", label: "Ruta" }
+  { id: "navegar", icon: "🧭", label: "Ruta" },
+  { id: "instalar", icon: "📲", label: "Instalar" },
+  { id: "privacidad", icon: "🔒", label: "Privacidad" }
 ];
+
+function isIosDevice() {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
 
 const QUICK = ["HND","NRT","KIX","NGO","FUK","CTS","OKA","JFK","LAX","ORD","MIA","DFW","ATL","SFO","SEA","MEX","NLU","CUN","GDL","MTY","TIJ","SJD","PVR","MID","MAD"];
 
@@ -78,7 +85,8 @@ export default function AppClient() {
       setInstallEvent(null);
       return;
     }
-    setIosTip(true);
+    // Sin aviso nativo disponible: en iPhone/iPad el único camino es el menú Compartir.
+    setIosTip(isIosDevice());
   }
 
   useEffect(() => {
@@ -287,7 +295,21 @@ export default function AppClient() {
     if (id === "inicio") {
       return (
         <main className="screen">
-          <HomeTab country={country} setCountry={setCountry} results={results} airports={airports} query={query} onSelect={selectAirport} airport={airport} installed={installed} installApp={installApp} iosTip={iosTip} weather={weather} counts={counts} />
+          <HomeTab country={country} setCountry={setCountry} results={results} airports={airports} query={query} onSelect={selectAirport} airport={airport} weather={weather} counts={counts} />
+        </main>
+      );
+    }
+    if (id === "instalar") {
+      return (
+        <main className="screen">
+          <InstallTab installed={installed} installApp={installApp} iosTip={iosTip} canPrompt={!!installEvent} />
+        </main>
+      );
+    }
+    if (id === "privacidad") {
+      return (
+        <main className="screen">
+          <PrivacyTab />
         </main>
       );
     }
@@ -368,7 +390,7 @@ export default function AppClient() {
       )}
 
       <nav className="tabs" aria-label="Navegación principal">
-        <div className="tabs-list" role="tablist" aria-label="Secciones" aria-orientation="horizontal" onKeyDown={onTabListKeyDown}>
+        <div className="tabs-list" style={{ "--n": String(TABS.length) }} role="tablist" aria-label="Secciones" aria-orientation="horizontal" onKeyDown={onTabListKeyDown}>
           <span className="tabs-indicator" aria-hidden="true" style={{ "--i": String(activeIndex) }} />
           {TABS.map((t) => (
             <button

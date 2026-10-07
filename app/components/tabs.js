@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { COUNTRY_FLAG } from "../../lib/countries";
 import { isDetailedHub } from "../../lib/hubs";
 import { formatKm } from "../../lib/geo";
 import { Rail } from "./interactions";
+import PrivacyContent from "./PrivacyContent";
 import SwipeCard from "./SwipeCard";
 
 export function NearbyList({ title, items, onPick }) {
@@ -24,7 +24,7 @@ export function NearbyList({ title, items, onPick }) {
   );
 }
 
-export function HomeTab({ country, setCountry, results, query, onSelect, airport, installed, installApp, iosTip, weather, counts }) {
+export function HomeTab({ country, setCountry, results, query, onSelect, airport, weather, counts }) {
   const selectedKey = airport ? `${airport.iata}${airport.icao || ""}` : null;
   const filters = [
     { id: "ALL", label: "Destacados" },
@@ -42,23 +42,6 @@ export function HomeTab({ country, setCountry, results, query, onSelect, airport
           {counts.JP} aeropuertos en Japón, {counts.US} en Estados Unidos y {counts.MX} en México. Elige salida con GPS,
           tocando el mapa o un aeropuerto cercano.
         </p>
-        {!installed && (
-          <div className="btn-row">
-            <button type="button" className="btn primary full" onClick={installApp}>
-              Instalar en este dispositivo
-            </button>
-          </div>
-        )}
-        {installed && (
-          <p className="status ok" role="status">
-            App instalada. Se abre a pantalla completa.
-          </p>
-        )}
-        {iosTip && !installed && (
-          <p className="status info" role="status">
-            iPhone/iPad: toca Compartir y luego «Añadir a pantalla de inicio».
-          </p>
-        )}
       </section>
       {airport && (
         <section className="card">
@@ -123,11 +106,96 @@ export function HomeTab({ country, setCountry, results, query, onSelect, airport
         })}
         {!results.length && <div className="empty">No encontré ese aeropuerto.</div>}
       </Rail>
-
-      <p className="muted" style={{ marginTop: 16 }}>
-        <Link href="/privacidad">Política de privacidad</Link>
-      </p>
     </>
+  );
+}
+
+export function InstallTab({ installed, installApp, iosTip, canPrompt }) {
+  return (
+    <>
+      <section className="hero">
+        <p className="kicker">Instalación</p>
+        <h2>Instalar en este dispositivo</h2>
+        <p className="muted">
+          AeroGuía funciona como app instalable: se abre a pantalla completa, con su propio icono, y guarda el
+          contenido básico para volver a abrirla sin conexión.
+        </p>
+        {installed ? (
+          <p className="status ok" role="status">
+            App instalada. Se abre a pantalla completa.
+          </p>
+        ) : (
+          <div className="btn-row">
+            <button type="button" className="btn primary full" onClick={installApp}>
+              Instalar en este dispositivo
+            </button>
+          </div>
+        )}
+        {!installed && iosTip && (
+          <p className="status info" role="status">
+            iPhone/iPad: toca Compartir y luego «Añadir a pantalla de inicio».
+          </p>
+        )}
+        {!installed && !iosTip && !canPrompt && (
+          <p className="muted" style={{ marginTop: 8 }} role="status">
+            Si tu navegador no ofrece el aviso, usa su menú y elige «Instalar app» o «Añadir a pantalla de inicio».
+          </p>
+        )}
+      </section>
+
+      <section className="card">
+        <h3>Qué incluye la versión instalada</h3>
+        <ul className="plain">
+          <li>
+            <span aria-hidden="true">📴</span> <span>Pantalla completa, sin la barra del navegador.</span>
+          </li>
+          <li>
+            <span aria-hidden="true">🚀</span> <span>Abre directo desde el icono de tu inicio o escritorio.</span>
+          </li>
+          <li>
+            <span aria-hidden="true">🧭</span> <span>GPS, mapa y rutas siguen pidiendo permiso solo cuando los usas.</span>
+          </li>
+          <li>
+            <span aria-hidden="true">🔄</span> <span>Se actualiza sola cuando hay una versión nueva.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section className="card">
+        <h3>Cómo instalarla</h3>
+        <div className="steps-plain">
+          <div>
+            <span className="dot" aria-hidden="true">1</span>
+            <p className="muted">
+              <strong>Android (Chrome o Edge):</strong> toca «Instalar en este dispositivo» aquí arriba; si no
+              aparece, abre el menú ⋮ y elige «Instalar app» o «Añadir a pantalla de inicio».
+            </p>
+          </div>
+          <div>
+            <span className="dot" aria-hidden="true">2</span>
+            <p className="muted">
+              <strong>iPhone o iPad (Safari):</strong> toca Compartir <span aria-hidden="true">⬆️</span> y luego
+              «Añadir a pantalla de inicio».
+            </p>
+          </div>
+          <div>
+            <span className="dot" aria-hidden="true">3</span>
+            <p className="muted">
+              <strong>Computadora (Chrome o Edge):</strong> icono de instalar en la barra de direcciones, o menú ⋮ →
+              «Instalar AeroGuía».
+            </p>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+export function PrivacyTab() {
+  return (
+    <section className="card legal-embed">
+      <PrivacyContent />
+    </section>
   );
 }
 
