@@ -67,6 +67,9 @@ button,a,input,select,textarea,[role="tab"],[role="radio"],[role="switch"],[role
 .panel { position:absolute; inset:0; }
 .panel.enter { z-index:1; animation:panelIn 220ms var(--ease) both; }
 .panel.leave { z-index:0; pointer-events:none; animation:panelOut 200ms var(--ease) both; }
+/* Oculta el panel del mapa sin desmontarlo: Leaflet conserva instancia,
+   teselas y posición; `MapView` llama a invalidateSize() al volver. */
+.panel.off { display:none; }
 @keyframes panelIn { from { opacity:0; transform:translateX(calc(var(--dir,1) * 16px)); } to { opacity:1; transform:translateX(0); } }
 @keyframes panelOut { from { opacity:1; transform:translateX(0); } to { opacity:0; transform:translateX(calc(var(--dir,1) * -14px)); } }
 .screen.map-screen { padding:0 0 var(--tab-h); overflow:hidden; }
@@ -210,6 +213,9 @@ h2,h3 { margin:0 0 6px; } .muted { color:var(--muted); margin:0; }
 /* --------------------------------- mapa --------------------------------- */
 .map-full { position:absolute; inset:0 0 calc(var(--tab-h) + env(safe-area-inset-bottom)) 0; }
 .map-full .leaflet-container, .map-full > div { height:100%; width:100%; }
+/* Atribución OSM obligatoria, pero discreta para no robar espacio al mapa. */
+.map-full .leaflet-control-attribution { font-size:10px; background:rgba(255,255,255,.78); border-radius:8px 0 0 0; padding:2px 6px; max-width:62%; }
+.map-full .leaflet-control-attribution a { color:#1d4ed8; }
 .map-float-wrap { position:absolute; left:10px; right:10px; top:calc(10px + env(safe-area-inset-top)); z-index:1600; pointer-events:auto; }
 .map-float { padding:4px; gap:6px; }
 .map-sheet { position:absolute; left:10px; right:10px; bottom:calc(var(--tab-h) + env(safe-area-inset-bottom) + 10px); z-index:1600; background:#fff; border-radius:22px; padding:10px 14px 14px; box-shadow:0 12px 40px rgba(0,0,0,.18); max-height:min(46%,360px); overflow:auto; overscroll-behavior:contain; pointer-events:auto; transition:max-height 240ms var(--ease); }

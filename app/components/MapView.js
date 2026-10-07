@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 
 export default function MapView({
@@ -14,12 +14,20 @@ export default function MapView({
   nearbyAirports,
   pickingOrigin,
   onPickOrigin,
-  onPickAirport
+  onPickAirport,
+  visible = true
 }) {
   const ref = useRef(null);
   const mapRef = useRef(null);
   const layersRef = useRef({});
   const pickRef = useRef({ pickingOrigin, onPickOrigin, onPickAirport });
+  // `ready` avisa cuando Leaflet terminó de cargar (import asíncrono) para que
+  // los efectos de capas se ejecuten aunque las props no cambien después.
+  const [ready, setReady] = useState(false);
+  // Referencia con las props más recientes: la inicialización es asíncrona y
+  // no debe quedarse con un aeropuerto obsoleto.
+  const latestRef = useRef({});
+  latestRef.current = { airport };
 
   pickRef.current = { pickingOrigin, onPickOrigin, onPickAirport };
 
@@ -29,15 +37,19 @@ export default function MapView({
       const L = (await import("leaflet")).default;
       if (cancelled || !ref.current || mapRef.current) return;
 
+      const center = latestRef.current.airport;
       const map = L.map(ref.current, {
         zoomControl: true,
-        attributionControl: false,
-        tap: true
+        attributionControl: true
       });
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19
+        maxZoom: 19,
+        // Atribución requerida por la política de teselas de OpenStreetMap.
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>'
       }).addTo(map);
-      map.setView([airport.lat, airport.lon], 14);
+      map.attributionControl.setPrefix(false);
+      map.setView(center ? [center.lat, center.lon] : [0, 0], center ? 14 : 2);
       map.on("click", (e) => {
         const cur = pickRef.current;
         if (!cur.pickingOrigin || !cur.onPickOrigin) return;
@@ -57,18 +69,33 @@ export default function MapView({
       };
       setTimeout(() => map.invalidateSize(), 80);
       setTimeout(() => map.invalidateSize(), 320);
+      setReady(true);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Al volver a mostrarse (cambio de pestaña) el contenedor pasó por
+  // display:none: hay que recalcular el tamaño para que Leaflet dibuje bien.
+  useEffect(() => {
+    if (!ready || !visible) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const raf = requestAnimationFrame(() => map.invalidateSize());
+    const timers = [240, 620].map((ms) => setTimeout(() => map.invalidateSize(), ms));
+    return () => {
+      cancelAnimationFrame(raf);
+      timers.forEach(clearTimeout);
+    };
+  }, [ready, visible]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !airport) return;
     map.setView([airport.lat, airport.lon], 14);
     setTimeout(() => map.invalidateSize(), 60);
-  }, [airport?.iata, airport?.lat, airport?.lon]);
+  }, [ready, airport?.iata, airport?.lat, airport?.lon]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -81,11 +108,11 @@ export default function MapView({
   useEffect(() => {
     const map = mapRef.current;
     const layers = layersRef.current;
-    if (!map || !layers.L) return;
+    if (!ready || !map || !layers.L) return;
     const L = layers.L;
     layers.markers.clearLayers();
-    const visible = filter === "all" ? pois : pois.filter((p) => p.category === filter);
-    visible.forEach((p) => {
+    const visiblePois = filter === "all" ? pois : pois.filter((p) => p.category === filter);
+    visiblePois.forEach((p) => {
       const icon = L.divIcon({
         className: "",
         html: `<div class="map-pin" style="background:${p.color}">${p.emoji}</div>`,
@@ -109,12 +136,12 @@ export default function MapView({
       });
       marker.addTo(layers.markers);
     });
-  }, [pois, filter, airport?.iata]);
+  }, [ready, pois, filter, airport?.iata]);
 
   useEffect(() => {
     const map = mapRef.current;
     const layers = layersRef.current;
-    if (!map || !layers.L || !layers.airports) return;
+    if (!ready || !map || !layers.L || !layers.airports) return;
     const L = layers.L;
     layers.airports.clearLayers();
     const list = nearbyAirports || [];
@@ -139,12 +166,12 @@ export default function MapView({
       });
       marker.addTo(layers.airports);
     });
-  }, [nearbyAirports]);
+  }, [ready, nearbyAirports]);
 
   useEffect(() => {
     const map = mapRef.current;
     const layers = layersRef.current;
-    if (!map || !layers.L) return;
+    if (!ready || !map || !layers.L) return;
     const L = layers.L;
     layers.extras.clearLayers();
 
@@ -189,7 +216,7 @@ export default function MapView({
         .bindPopup(`<strong>${f.callsign || "Vuelo"}</strong>`)
         .addTo(layers.extras);
     });
-  }, [origin, destination, routeGeo, flights]);
+  }, [ready, origin, destination, routeGeo, flights]);
 
   useEffect(() => {
     return () => {
