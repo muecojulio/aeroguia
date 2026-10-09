@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { COUNTRY_FLAG } from "../../lib/countries";
 import { categoryMeta, poisForAirport } from "../../lib/hubs";
 import { nearestAirports } from "../../lib/geo";
-import { buildAirportIndex } from "../../lib/airportsIndex";
 import { foldText } from "../../lib/text";
 import { HomeTab, FlightsTab, NavTab, WeatherLine, NearbyList, InstallTab, PrivacyTab } from "./tabs";
 import AirportCombobox from "./AirportCombobox";
@@ -34,6 +33,7 @@ export default function AppClient() {
   const [query, setQuery] = useState("");
   const [country, setCountry] = useState("ALL");
   const [tab, setTab] = useState("inicio");
+  const [mapInitialized, setMapInitialized] = useState(false);
   const [airport, setAirport] = useState(null);
   const [filter, setFilter] = useState("all");
   const [origin, setOrigin] = useState(null);
@@ -70,9 +70,13 @@ export default function AppClient() {
     const standalone = window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: fullscreen)").matches || window.navigator.standalone === true;
     setInstalled(standalone);
     const onPrompt = (e) => { e.preventDefault(); setInstallEvent(e); };
+    const onInstalled = () => { setInstalled(true); setInstallEvent(null); };
     window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", () => { setInstalled(true); setInstallEvent(null); });
-    return () => window.removeEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
   }, []);
 
   useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
@@ -101,7 +105,6 @@ export default function AppClient() {
       // El dataset local está curado (tipo large/medium y país verificados), así que gana empates.
       for (const a of local) if (a?.iata) byIata.set(a.iata, a);
       const list = [...byIata.values()];
-      buildAirportIndex(list);
       setAirports(list);
       setAirport(list.find((x) => x.iata === "HND") || list[0]);
     }).catch(() => setAirports([]));
@@ -138,6 +141,7 @@ export default function AppClient() {
 
   function changeTab(id) {
     if (id === tab) return;
+    if (id === "mapa") setMapInitialized(true);
     const from = TABS.findIndex((t) => t.id === tab);
     const to = TABS.findIndex((t) => t.id === id);
     setDir(to >= from ? 1 : -1);
@@ -195,7 +199,16 @@ export default function AppClient() {
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const lat = pos.coords.latitude; const lon = pos.coords.longitude;
       let name = "Mi ubicación (GPS)";
-      try { const res = await fetch(`/api/lugar?lat=${lat}&lon=${lon}`); const data = await res.json(); if (data?.name) name = data.name; } catch {}
+      try {
+        const res = await fetch("/api/lugar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ lat, lon })
+        });
+        const data = await res.json();
+        if (res.ok && data?.name) name = data.name;
+      } catch {}
       applyOrigin({ lat, lon, name, source: "gps" }, "Punto de partida: tu GPS.");
       setGeoPending(false);
     }, (err) => {
@@ -210,7 +223,16 @@ export default function AppClient() {
   async function onPickOrigin(point) {
     let named = point;
     if (point.source === "map") {
-      try { const res = await fetch(`/api/lugar?lat=${point.lat}&lon=${point.lon}`); const data = await res.json(); if (data?.name) named = { ...point, name: data.name }; } catch {}
+      try {
+        const res = await fetch("/api/lugar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ lat: point.lat, lon: point.lon })
+        });
+        const data = await res.json();
+        if (res.ok && data?.name) named = { ...point, name: data.name };
+      } catch {}
     }
     applyOrigin(named, "Punto de partida marcado.");
   }
@@ -222,9 +244,19 @@ export default function AppClient() {
     if (routing) return;
     setRouting(true);
     setDestination(dest); setRouteErr("Calculando ruta a pie y en carro…"); setArrive(null); changeTab("navegar");
-    const params = new URLSearchParams({ fromLat: String(origin.lat), fromLon: String(origin.lon), toLat: String(dest.lat), toLon: String(dest.lon), dest: dest.name || "destino" });
     try {
-      const res = await fetch(`/api/llegar?${params}`);
+      const res = await fetch("/api/llegar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          fromLat: origin.lat,
+          fromLon: origin.lon,
+          toLat: dest.lat,
+          toLon: dest.lon,
+          dest: dest.name || "destino"
+        })
+      });
       const data = await res.json();
       if (!res.ok) { setRoute(null); setArrive(null); setRouteErr(data.error || "No se pudo calcular."); return; }
       setArrive(data);
@@ -263,7 +295,12 @@ export default function AppClient() {
     setSkyFlash(true);
     setTimeout(() => setSkyFlash(false), 1600);
   }
-  useEffect(() => { if (!airport) return; loadSky(); const id = setInterval(loadSky, 45000); return () => clearInterval(id); }, [airport?.iata]);
+  useEffect(() => {
+    if (!airport || (tab !== "mapa" && tab !== "vuelos")) return;
+    loadSky();
+    const id = setInterval(loadSky, 45000);
+    return () => clearInterval(id);
+  }, [airport?.iata, tab]);
   useEffect(() => {
     if (!airport) return;
     setWeather(null);
@@ -274,7 +311,12 @@ export default function AppClient() {
     if (!flightQuery.trim() || loadingFlight) return;
     setLoadingFlight(true);
     try {
-      const res = await fetch(`/api/vuelo?q=${encodeURIComponent(flightQuery.trim())}`);
+      const res = await fetch("/api/vuelo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ q: flightQuery.trim() })
+      });
       setFlightInfo(await res.json());
     } catch {
       setFlightInfo({ error: "Sin conexión para consultar el vuelo. Reinténtalo." });
@@ -295,7 +337,7 @@ export default function AppClient() {
     if (id === "inicio") {
       return (
         <main className="screen">
-          <HomeTab country={country} setCountry={setCountry} results={results} airports={airports} query={query} onSelect={selectAirport} airport={airport} weather={weather} counts={counts} />
+          <HomeTab country={country} setCountry={setCountry} results={results} query={query} onSelect={selectAirport} airport={airport} weather={weather} counts={counts} />
         </main>
       );
     }
@@ -362,13 +404,12 @@ export default function AppClient() {
     return null;
   }
 
-  /* El panel del mapa vive siempre montado con clave estable: al cambiar de
-     pestaña NO se destruye. Se oculta con CSS (display:none) y Leaflet
-     recalcula su tamaño al volver (prop `visible`). Así el mapa no parpadea
-     en gris ni se pierde la posición/zoom del usuario. */
+  /* El mapa se monta solo cuando la persona abre esa sección por primera vez;
+     después permanece montado al cambiar de pestaña para conservar la posición
+     y evitar nuevas solicitudes de teselas. Leaflet recalcula su tamaño al volver. */
   const mapActive = tab === "mapa";
   const mapVisible = mapActive || leaving === "mapa";
-  const mapScreen = airport ? screenFor("mapa") : null;
+  const mapScreen = airport && mapInitialized ? screenFor("mapa") : null;
   const current = tab === "mapa" ? null : screenFor(tab);
   const prev = !leaving || leaving === "mapa" ? null : screenFor(leaving);
   const mapCls =
@@ -387,7 +428,7 @@ export default function AppClient() {
       {tab !== "mapa" && (
         <header className="topbar">
           <div className="topbar-row">
-            <div className="brand"><div className="mark" aria-hidden="true">✈</div><div><h1>AeroGuía</h1><small>App de aeropuerto</small></div></div>
+            <div className="brand"><div className="mark" aria-hidden="true">✈</div><div><h1>AeroGuía</h1><small>Rutas · puertas · aventura</small></div></div>
             {airport && <span className="chip">{COUNTRY_FLAG[airport.country]} {airport.iata}</span>}
           </div>
           <AirportCombobox

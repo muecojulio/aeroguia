@@ -27,85 +27,139 @@ export function NearbyList({ title, items, onPick }) {
 export function HomeTab({ country, setCountry, results, query, onSelect, airport, weather, counts }) {
   const selectedKey = airport ? `${airport.iata}${airport.icao || ""}` : null;
   const filters = [
-    { id: "ALL", label: "Destacados" },
-    { id: "JP", label: `🇯🇵 Japón (${counts.JP})` },
-    { id: "US", label: `🇺🇸 EE. UU. (${counts.US})` },
-    { id: "MX", label: `🇲🇽 México (${counts.MX})` },
+    { id: "ALL", label: "✦ Para ti" },
+    { id: "JP", label: `🇯🇵 Japón · ${counts.JP}` },
+    { id: "US", label: `🇺🇸 EE. UU. · ${counts.US}` },
+    { id: "MX", label: `🇲🇽 México · ${counts.MX}` },
     { id: "ES", label: "🇪🇸 España" }
   ];
+
   return (
     <>
-      <section className="hero">
-        <p className="kicker">En el bolsillo</p>
-        <h2>Tu aeropuerto, en formato app.</h2>
-        <p className="muted">
-          {counts.JP} aeropuertos en Japón, {counts.US} en Estados Unidos y {counts.MX} en México. Elige salida con GPS,
-          tocando el mapa o un aeropuerto cercano.
-        </p>
+      <section className="hero home-hero">
+        <div className="home-hero-copy">
+          <p className="kicker home-kicker"><span aria-hidden="true">✦</span> RUTA LISTA PARA DESPEGAR</p>
+          <h2>El viaje empieza <em>antes del despegue.</em></h2>
+          <p className="home-intro">
+            Aeropuertos, clima, vuelos y caminos. Todo lo que necesitas para llegar con calma y viajar con ganas.
+          </p>
+          <div className="home-hero-footer">
+            <div className="home-current">
+              <span className="home-current-flag" aria-hidden="true">{COUNTRY_FLAG[airport?.country] || "🌍"}</span>
+              <span className="home-current-copy">
+                <small>BAJO TU RADAR</small>
+                <strong>{airport ? `${airport.city || airport.name} · ${airport.iata}` : "Preparando pistas…"}</strong>
+              </span>
+            </div>
+            {airport && (
+              <button type="button" className="home-map-link" onClick={() => onSelect(airport)}>
+                Ver mapa <span aria-hidden="true">↗</span>
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="home-hero-art" aria-hidden="true">
+          <span className="art-sun" />
+          <span className="art-orbit art-orbit-one" />
+          <span className="art-orbit art-orbit-two" />
+          <span className="art-route art-route-one" />
+          <span className="art-route art-route-two" />
+          <span className="art-plane">✈</span>
+          <span className="art-cloud art-cloud-one" />
+          <span className="art-cloud art-cloud-two" />
+          <span className="art-stamp"><small>BOARDING</small><strong>READY</strong><i>✦</i></span>
+          <span className="art-terminal"><i /><i /><i /><b /></span>
+          <span className="art-horizon" />
+        </div>
       </section>
+
       {airport && (
-        <section className="card">
-          <p className="kicker">Tiempo en {airport.iata}</p>
+        <section className="card home-weather-card">
+          <div className="weather-heading">
+            <div>
+              <p className="kicker">Afuera ahora</p>
+              <h3>Tiempo en {airport.iata}</h3>
+            </div>
+            <span className="weather-live"><i /> EN VIVO</span>
+          </div>
           <WeatherLine weather={weather} />
+          <span className="weather-sun" aria-hidden="true">☼</span>
+          <span className="weather-cloud" aria-hidden="true">☁</span>
         </section>
       )}
 
-      <Rail label="Filtros por país" className="pills-rail" scrollTo={country}>
-        {filters.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            data-key={f.id}
-            className={`pill ${country === f.id ? "active" : ""}`}
-            aria-pressed={country === f.id}
-            onClick={() => setCountry(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </Rail>
+      <section className="home-discovery">
+        <div className="home-section-heading">
+          <div>
+            <p className="kicker">TU PASE DE ABORDAR</p>
+            <h3>¿Dónde aterrizamos?</h3>
+          </div>
+          <span className="home-result-count">{results.length}<small> opciones</small></span>
+        </div>
+        <p className="home-lead">Explora destinos favoritos o encuentra tu aeropuerto por nombre, ciudad o código.</p>
 
-      {airport && !query && (
-        <p className="muted" style={{ marginBottom: 8 }}>
-          Ahora: {airport.iata} · {results.length} aeropuertos en esta lista
-        </p>
-      )}
-
-      <Rail
-        label="Resultados de aeropuertos"
-        variant="grid"
-        className="two"
-        scrollTo={selectedKey}
-        wrapClassName="results-wrap"
-      >
-        {results.map((a) => {
-          const key = `${a.iata}${a.icao || ""}`;
-          const isSelected = key === selectedKey;
-          return (
+        <Rail label="Filtros por país" className="pills-rail home-country-filters" scrollTo={country}>
+          {filters.map((f) => (
             <button
+              key={f.id}
               type="button"
-              key={key}
-              data-key={key}
-              className="airport-card"
-              aria-current={isSelected ? "true" : undefined}
-              onClick={() => onSelect(a)}
+              data-key={f.id}
+              className={`pill ${country === f.id ? "active" : ""}`}
+              aria-pressed={country === f.id}
+              onClick={() => setCountry(f.id)}
             >
-              <div>
-                <div className="iata">{a.iata}</div>
-                <strong>{a.city || a.name}</strong>
-                <p className="muted">
-                  {COUNTRY_FLAG[a.country]} {a.name}
-                </p>
-              </div>
-              <span className="badges">
-                {isSelected && <span className="badge current">✓ Seleccionado</span>}
-                {isDetailedHub(a.iata) ? <span className="badge">Detalle</span> : null}
-              </span>
+              {f.label}
             </button>
-          );
-        })}
-        {!results.length && <div className="empty">No encontré ese aeropuerto.</div>}
-      </Rail>
+          ))}
+        </Rail>
+
+        {airport && !query && (
+          <p className="home-now">En ruta: <strong>{airport.iata}</strong> · {results.length} aeropuertos a un toque</p>
+        )}
+
+        <Rail
+          label="Resultados de aeropuertos"
+          variant="grid"
+          className="two"
+          scrollTo={selectedKey}
+          wrapClassName="results-wrap"
+        >
+          {results.map((a) => {
+            const key = `${a.iata}${a.icao || ""}`;
+            const isSelected = key === selectedKey;
+            return (
+              <button
+                type="button"
+                key={key}
+                data-key={key}
+                data-country={a.country}
+                className="airport-card"
+                aria-current={isSelected ? "true" : undefined}
+                onClick={() => onSelect(a)}
+              >
+                <span className="airport-card-top">
+                  <span className="airport-flag" aria-hidden="true">{COUNTRY_FLAG[a.country] || "🌐"}</span>
+                  <span className="airport-eyebrow">{isDetailedHub(a.iata) ? "AEROPUERTO DESTACADO" : "SIGUIENTE DESTINO"}</span>
+                </span>
+                <span className="airport-card-main">
+                  <span className="airport-card-copy">
+                    <span className="iata">{a.iata}</span>
+                    <strong>{a.city || a.name}</strong>
+                    <span className="muted airport-name">{a.name}</span>
+                  </span>
+                  <span className="airport-card-arrow" aria-hidden="true">↗</span>
+                </span>
+                <span className="airport-card-bottom">
+                  <span className="airport-card-action">{isSelected ? "✓ EN TU RUTA" : "EXPLORAR AEROPUERTO"}</span>
+                  {isDetailedHub(a.iata) && <span className="badge">GUÍA</span>}
+                </span>
+              </button>
+            );
+          })}
+          {!results.length && <div className="empty">No encontramos ese aeropuerto. Prueba otro nombre o código.</div>}
+        </Rail>
+        <p className="home-footnote"><span aria-hidden="true">✦</span> Guarda el rumbo: selecciona cualquier aeropuerto para abrir su mapa.</p>
+      </section>
     </>
   );
 }

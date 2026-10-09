@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "AeroGuía",
-  description: "Mapas, servicios y cómo llegar en el aeropuerto.",
+  title: "AeroGuía · Viaja con rumbo",
+  description: "Aeropuertos, vuelos, clima y rutas: tu compañera de viaje en cada escala.",
   applicationName: "AeroGuía",
   appleWebApp: { capable: true, title: "AeroGuía", statusBarStyle: "black-translucent" },
   icons: {
@@ -20,7 +20,7 @@ export const viewport = {
   initialScale: 1,
   // Sin maximumScale ni userScalable:false: no bloqueamos el zoom.
   viewportFit: "cover",
-  themeColor: "#071526"
+  themeColor: "#18243e"
 };
 
 export default function RootLayout({ children }) {

@@ -1,77 +1,115 @@
 import { cacheGet, cacheSet, cacheKey } from "../../../lib/cache";
+import { isSameOriginRequest, parseCoordinate, privateJson, readJsonBody } from "../../../lib/requestValidation";
 
 const MODES = [
-  { id: "driving", osrm: "driving", label: "En carro" },
-  { id: "foot", osrm: "foot", label: "A pie" }
+  { id: "driving", osrm: "driving" },
+  { id: "foot", osrm: "foot" }
 ];
+const MAX_ROUTE_BYTES = 3 * 1024 * 1024;
+const MAX_STEPS = 300;
 
-export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const fromLat = searchParams.get("fromLat");
-  const fromLon = searchParams.get("fromLon");
-  const toLat = searchParams.get("toLat");
-  const toLon = searchParams.get("toLon");
-  const destName = searchParams.get("dest") || "el destino";
+export async function POST(request) {
+  if (!isSameOriginRequest(request)) return privateJson({ error: "Solicitud no permitida" }, 403);
 
-  if (!fromLat || !fromLon || !toLat || !toLon) {
-    return Response.json({ error: "Faltan puntos" }, { status: 400 });
+  const body = await readJsonBody(request);
+  const fromLat = parseCoordinate(body?.fromLat, -90, 90);
+  const fromLon = parseCoordinate(body?.fromLon, -180, 180);
+  const toLat = parseCoordinate(body?.toLat, -90, 90);
+  const toLon = parseCoordinate(body?.toLon, -180, 180);
+  if ([fromLat, fromLon, toLat, toLon].some((value) => value == null)) {
+    return privateJson({ error: "Los puntos de la ruta no son válidos" }, 400);
   }
 
-  const key = cacheKey(["llegar", fromLat, fromLon, toLat, toLon]);
+  const destName = cleanText(body?.dest, 80) || "el destino";
+  const key = cacheKey(["llegar", fromLat, fromLon, toLat, toLon, destName]);
   const hit = cacheGet(key);
-  if (hit) {
-    return Response.json(hit, { headers: { "Cache-Control": "public, max-age=120" } });
-  }
+  if (hit) return privateJson(hit);
 
-  const modes = {};
-  for (const mode of MODES) {
-    modes[mode.id] = await fetchOsrm(mode.osrm, fromLon, fromLat, toLon, toLat);
-  }
-
-  const driving = modes.driving;
-  const foot = modes.foot;
+  const results = await Promise.all(
+    MODES.map((mode) => fetchOsrm(mode.osrm, fromLon, fromLat, toLon, toLat))
+  );
+  const modes = Object.fromEntries(MODES.map((mode, index) => [mode.id, results[index]]));
   const payload = {
     destName,
-    driving,
-    foot,
-    howTo: howToCopy(destName, driving, foot)
+    driving: modes.driving,
+    foot: modes.foot,
+    howTo: howToCopy(destName, modes.driving, modes.foot)
   };
   cacheSet(key, payload, 3 * 60 * 1000);
-  return Response.json(payload, { headers: { "Cache-Control": "public, max-age=120" } });
+  return privateJson(payload);
 }
 
 async function fetchOsrm(profile, fromLon, fromLat, toLon, toLat) {
-  const url =
-    `https://router.project-osrm.org/route/v1/${profile}/` +
-    `${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson&steps=true`;
+  const coordinates = [fromLon, fromLat, toLon, toLat].map((value) => Number(value.toFixed(6)));
+  const [safeFromLon, safeFromLat, safeToLon, safeToLat] = coordinates;
+  const params = new URLSearchParams({ overview: "full", geometries: "geojson", steps: "true" });
+  const url = `https://router.project-osrm.org/route/v1/${profile}/${safeFromLon},${safeFromLat};${safeToLon},${safeToLat}?${params}`;
+
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "AeroGuia/1.1" },
-      next: { revalidate: 120 }
+      headers: { "User-Agent": "AeroGuia/1.1", Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+      cache: "no-store"
     });
     if (!res.ok) return { error: "El calculador de rutas no respondió" };
-    const data = await res.json();
-    const route = data.routes?.[0];
-    if (!route) return { error: "No hay una ruta viable" };
+
+    const contentLength = Number(res.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > MAX_ROUTE_BYTES) {
+      return { error: "La ruta recibida es demasiado grande" };
+    }
+    const text = await res.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_ROUTE_BYTES) {
+      return { error: "La ruta recibida es demasiado grande" };
+    }
+    const data = JSON.parse(text);
+    const route = data?.routes?.[0];
+    if (!route || !Number.isFinite(route.distance) || !Number.isFinite(route.duration)) {
+      return { error: "No hay una ruta viable" };
+    }
+
+    const geometry = validGeometry(route.geometry);
+    if (!geometry) return { error: "La geometría de la ruta no es válida" };
+
     const steps = [];
-    for (const leg of route.legs || []) {
-      for (const step of leg.steps || []) {
+    for (const leg of Array.isArray(route.legs) ? route.legs : []) {
+      for (const step of Array.isArray(leg.steps) ? leg.steps : []) {
+        if (steps.length >= MAX_STEPS) break;
+        const distance = Number(step.distance);
+        const duration = Number(step.duration);
+        if (!Number.isFinite(distance) || !Number.isFinite(duration)) continue;
+        const name = cleanText(step.name, 100) || "el camino";
         steps.push({
-          instruction: humanStep(step.maneuver?.type, step.maneuver?.modifier, step.name || "el camino"),
-          distance: Math.round(step.distance),
-          duration: Math.round(step.duration)
+          instruction: humanStep(step.maneuver?.type, step.maneuver?.modifier, name),
+          distance: Math.round(distance),
+          duration: Math.round(duration)
         });
       }
+      if (steps.length >= MAX_STEPS) break;
     }
+
     return {
       distance: route.distance,
       duration: route.duration,
-      geometry: route.geometry,
+      geometry,
       steps
     };
   } catch {
-    return { error: "Error de red al calcular la ruta" };
+    return { error: "No se pudo calcular esta ruta ahora" };
   }
+}
+
+function validGeometry(geometry) {
+  if (geometry?.type !== "LineString" || !Array.isArray(geometry.coordinates)) return null;
+  if (geometry.coordinates.length < 2 || geometry.coordinates.length > 20000) return null;
+  const coordinates = [];
+  for (const pair of geometry.coordinates) {
+    if (!Array.isArray(pair) || pair.length < 2) return null;
+    const lon = Number(pair[0]);
+    const lat = Number(pair[1]);
+    if (!Number.isFinite(lon) || lon < -180 || lon > 180 || !Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+    coordinates.push([lon, lat]);
+  }
+  return { type: "LineString", coordinates };
 }
 
 function howToCopy(dest, driving, foot) {
@@ -79,7 +117,7 @@ function howToCopy(dest, driving, foot) {
   if (foot && !foot.error) {
     lines.push(
       `A pie: ${formatKm(foot.distance)} · ${formatMin(foot.duration)}. ` +
-        `Útil dentro de la terminal o si estás en el predio del aeropuerto.`
+        "Útil dentro de la terminal o si estás en el predio del aeropuerto."
     );
   }
   if (driving && !driving.error) {
@@ -95,17 +133,17 @@ function howToCopy(dest, driving, foot) {
   return lines;
 }
 
-function formatKm(m) {
-  if (!Number.isFinite(m)) return "—";
-  if (m < 1000) return `${Math.round(m)} m`;
-  return `${(m / 1000).toFixed(1)} km`;
+function formatKm(meters) {
+  if (!Number.isFinite(meters)) return "—";
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
 }
 
-function formatMin(s) {
-  if (!Number.isFinite(s)) return "—";
-  const min = Math.max(1, Math.round(s / 60));
-  if (min < 60) return `${min} min`;
-  return `${Math.floor(min / 60)} h ${min % 60} min`;
+function formatMin(seconds) {
+  if (!Number.isFinite(seconds)) return "—";
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 function humanStep(type, modifier, name) {
@@ -122,9 +160,14 @@ function humanStep(type, modifier, name) {
   if (type === "depart") return `Sal hacia ${name}`;
   if (type === "arrive") return `Has llegado a ${name}`;
   if (type === "roundabout") return `Entra en la rotonda y sal hacia ${name}`;
-  if (type === "turn" || type === "end of road" || type === "fork" || type === "new name") {
+  if (["turn", "end of road", "fork", "new name"].includes(type)) {
     return `${turn[modifier] || "continúa"} por ${name}`;
   }
   if (type === "merge") return `Incorpórate hacia ${name}`;
   return `Continúa por ${name}`;
+}
+
+function cleanText(value, maxLength) {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
 }

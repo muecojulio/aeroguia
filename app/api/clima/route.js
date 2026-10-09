@@ -1,49 +1,64 @@
 import { cacheGet, cacheSet, cacheKey } from "../../../lib/cache";
+import { readCoordinate } from "../../../lib/requestValidation";
+
+const CACHE_HEADERS = { "Cache-Control": "public, max-age=300" };
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const lat = searchParams.get("lat");
-  const lon = searchParams.get("lon");
-  if (!lat || !lon) {
-    return Response.json({ error: "Faltan coordenadas" }, { status: 400 });
+  const lat = readCoordinate(searchParams, "lat", -90, 90);
+  const lon = readCoordinate(searchParams, "lon", -180, 180);
+  if (lat == null || lon == null) {
+    return Response.json({ error: "Coordenadas inválidas" }, { status: 400 });
   }
 
-  const key = cacheKey(["clima", lat, lon]);
+  // Coordinates are rounded to keep equivalent lookups in the same cache entry.
+  const roundedLat = Number(lat.toFixed(3));
+  const roundedLon = Number(lon.toFixed(3));
+  const key = cacheKey(["clima", roundedLat, roundedLon]);
   const hit = cacheGet(key);
-  if (hit) {
-    return Response.json(hit, { headers: { "Cache-Control": "public, max-age=300" } });
-  }
+  if (hit) return Response.json(hit, { headers: CACHE_HEADERS });
 
-  const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(lat)}` +
-    `&longitude=${encodeURIComponent(lon)}` +
-    `&current=temperature_2m,weather_code,wind_speed_10m,precipitation,relative_humidity_2m` +
-    `&timezone=auto`;
+  const params = new URLSearchParams({
+    latitude: String(roundedLat),
+    longitude: String(roundedLon),
+    current: "temperature_2m,weather_code,wind_speed_10m,precipitation,relative_humidity_2m",
+    timezone: "auto"
+  });
 
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "AeroGuia/1.1" },
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
+      headers: { "User-Agent": "AeroGuia/1.1", Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
       next: { revalidate: 600 }
     });
     if (!res.ok) {
       return Response.json({ error: "Clima no disponible ahora" }, { status: 502 });
     }
+
     const data = await res.json();
-    const c = data.current || {};
-    const code = Number(c.weather_code);
+    const current = data?.current;
+    const temp = Number(current?.temperature_2m);
+    const wind = Number(current?.wind_speed_10m);
+    const code = Number(current?.weather_code);
+    const rain = Number(current?.precipitation);
+    const humidity = Number(current?.relative_humidity_2m);
+    if (![temp, wind, code, rain, humidity].every(Number.isFinite)) {
+      return Response.json({ error: "Respuesta de clima inválida" }, { status: 502 });
+    }
+
     const payload = {
-      temp: Math.round(c.temperature_2m),
-      wind: Math.round(c.wind_speed_10m),
-      rain: c.precipitation || 0,
-      humidity: c.relative_humidity_2m,
+      temp: Math.round(temp),
+      wind: Math.round(wind),
+      rain,
+      humidity,
       code,
       label: weatherLabel(code),
       emoji: weatherEmoji(code)
     };
     cacheSet(key, payload, 10 * 60 * 1000);
-    return Response.json(payload, { headers: { "Cache-Control": "public, max-age=300" } });
+    return Response.json(payload, { headers: CACHE_HEADERS });
   } catch {
-    return Response.json({ error: "No se pudo leer el clima" }, { status: 500 });
+    return Response.json({ error: "No se pudo consultar el clima" }, { status: 502 });
   }
 }
 
