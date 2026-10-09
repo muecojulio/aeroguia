@@ -1,59 +1,65 @@
-export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const q = (searchParams.get("q") || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
-  if (!q) {
-    return Response.json({ error: "Escribe un número de vuelo" }, { status: 400 });
-  }
+import { isSameOriginRequest, privateJson, readJsonBody } from "../../../lib/requestValidation";
+
+export async function POST(request) {
+  if (!isSameOriginRequest(request)) return privateJson({ error: "Solicitud no permitida" }, 403);
+
+  const body = await readJsonBody(request);
+  const q = String(body?.q || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  if (!q) return privateJson({ error: "Escribe un número de vuelo" }, 400);
 
   const key = process.env.AVIATIONSTACK_KEY;
-  if (!key) {
-    return Response.json({
-      demo: true,
-      flight: demoFlight(q)
-    });
-  }
+  if (!key) return privateJson({ demo: true, flight: demoFlight(q) });
 
-  const url = `https://api.aviationstack.com/v1/flights?access_key=${encodeURIComponent(key)}&flight_iata=${encodeURIComponent(q)}`;
+  const params = new URLSearchParams({ access_key: key, flight_iata: q });
   try {
-    const res = await fetch(url, { next: { revalidate: 60 } });
+    const res = await fetch(`https://api.aviationstack.com/v1/flights?${params}`, {
+      headers: { Accept: "application/json", "User-Agent": "AeroGuia/1.1" },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store"
+    });
+    if (!res.ok) return privateJson({ error: "El servicio de vuelos no respondió" }, 502);
+
     const data = await res.json();
-    const row = data?.data?.[0];
+    const row = Array.isArray(data?.data) ? data.data[0] : null;
     if (!row) {
-      return Response.json({
+      return privateJson({
         demo: false,
         empty: true,
         message: "No encontré ese vuelo ahora. Revisa el código (ej. AA100, NH203)."
       });
     }
-    return Response.json({
+
+    return privateJson({
       demo: false,
       flight: {
-        iata: row.flight?.iata || q,
-        airline: row.airline?.name,
-        status: row.flight_status,
-        departure: {
-          airport: row.departure?.airport,
-          iata: row.departure?.iata,
-          gate: row.departure?.gate,
-          terminal: row.departure?.terminal,
-          delay: row.departure?.delay,
-          scheduled: row.departure?.scheduled,
-          estimated: row.departure?.estimated
-        },
-        arrival: {
-          airport: row.arrival?.airport,
-          iata: row.arrival?.iata,
-          gate: row.arrival?.gate,
-          terminal: row.arrival?.terminal,
-          delay: row.arrival?.delay,
-          scheduled: row.arrival?.scheduled,
-          estimated: row.arrival?.estimated
-        }
+        iata: cleanText(row.flight?.iata, 10) || q,
+        airline: cleanText(row.airline?.name, 100),
+        status: cleanText(row.flight_status, 40),
+        departure: airportInfo(row.departure),
+        arrival: airportInfo(row.arrival)
       }
     });
   } catch {
-    return Response.json({ error: "No se pudo consultar el vuelo" }, { status: 500 });
+    return privateJson({ error: "No se pudo consultar el vuelo" }, 502);
   }
+}
+
+function airportInfo(value) {
+  const delay = Number(value?.delay);
+  return {
+    airport: cleanText(value?.airport, 120),
+    iata: cleanText(value?.iata, 4),
+    gate: cleanText(value?.gate, 20),
+    terminal: cleanText(value?.terminal, 20),
+    delay: Number.isFinite(delay) ? delay : null,
+    scheduled: cleanText(value?.scheduled, 40),
+    estimated: cleanText(value?.estimated, 40)
+  };
+}
+
+function cleanText(value, maxLength) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, maxLength);
 }
 
 function demoFlight(q) {

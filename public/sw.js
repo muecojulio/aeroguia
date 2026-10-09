@@ -1,31 +1,50 @@
-const CACHE = "aeroguia-v5";
+const CACHE = "aeroguia-v6";
 
 self.addEventListener("install", (event) => {
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((key) => key.startsWith("aeroguia-") && key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/")) return;
+  const request = event.request;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/") || url.search) return;
+  if (!isAppShellOrStatic(request, url)) return;
+
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
-          return res;
+    caches.match(request).then((cached) => {
+      const network = fetch(request)
+        .then((response) => {
+          const cacheControl = response.headers.get("Cache-Control") || "";
+          if (response.ok && response.type === "basic" && !/no-store|private/i.test(cacheControl)) {
+            caches.open(CACHE).then((cache) => cache.put(request, response.clone())).catch(() => {});
+          }
+          return response;
         })
-        .catch(() => cached);
+        .catch(() => cached || new Response("Sin conexión", {
+          status: 503,
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }
+        }));
       return cached || network;
     })
   );
 });
+
+function isAppShellOrStatic(request, url) {
+  if (request.mode === "navigate") return url.pathname === "/" || url.pathname === "/privacidad";
+  return (
+    url.pathname.startsWith("/_next/static/") ||
+    url.pathname.startsWith("/data/") ||
+    /^\/(?:icon(?:-180|-192|-512)?\.(?:svg|png)|manifest\.json)$/.test(url.pathname)
+  );
+}

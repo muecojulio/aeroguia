@@ -3,7 +3,7 @@ import PrivacyContent from "../components/PrivacyContent";
 
 export const metadata = {
   title: "Política de privacidad · AeroGuía",
-  description: "Cómo trata AeroGuía la ubicación, el clima y las consultas de vuelo."
+  description: "Qué datos utiliza AeroGuía, cuándo se consulta tu ubicación y qué servicios externos participan."
 };
 
 export default function PrivacidadPage() {

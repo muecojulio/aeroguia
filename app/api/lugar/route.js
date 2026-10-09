@@ -1,18 +1,19 @@
 import { cacheGet, cacheSet, cacheKey } from "../../../lib/cache";
+import { isSameOriginRequest, parseCoordinate, privateJson, readJsonBody } from "../../../lib/requestValidation";
 
-export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const lat = Number(searchParams.get("lat"));
-  const lon = Number(searchParams.get("lon"));
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return Response.json({ error: "Faltan coordenadas" }, { status: 400 });
+export async function POST(request) {
+  if (!isSameOriginRequest(request)) return privateJson({ error: "Solicitud no permitida" }, 403);
+
+  const body = await readJsonBody(request);
+  const lat = parseCoordinate(body?.lat, -90, 90);
+  const lon = parseCoordinate(body?.lon, -180, 180);
+  if (lat == null || lon == null) {
+    return privateJson({ error: "Coordenadas inválidas" }, 400);
   }
 
   const key = cacheKey(["lugar", lat.toFixed(4), lon.toFixed(4)]);
   const hit = cacheGet(key);
-  if (hit) {
-    return Response.json(hit, { headers: { "Cache-Control": "public, max-age=300" } });
-  }
+  if (hit) return privateJson(hit);
 
   const params = new URLSearchParams({
     lat: String(lat),
@@ -21,39 +22,38 @@ export async function GET(request) {
     zoom: "16",
     addressdetails: "1"
   });
-  const url = `https://nominatim.openstreetmap.org/reverse?${params}`;
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
       headers: {
         "User-Agent": "AeroGuia/1.1 (airport companion; personal use)",
         Accept: "application/json"
       },
-      next: { revalidate: 3600 }
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store"
     });
-    if (!res.ok) {
-      return Response.json({ name: "Punto en el mapa", source: "map" });
-    }
+    if (!res.ok) return privateJson({ name: "Punto en el mapa", source: "map" });
+
     const data = await res.json();
-    const addr = data.address || {};
-    const name =
-      data.name ||
-      addr.aerodrome ||
-      addr.amenity ||
-      addr.road ||
-      addr.suburb ||
-      addr.city ||
-      addr.town ||
-      data.display_name?.split(",")[0] ||
-      "Punto en el mapa";
+    const address = data?.address || {};
+    const name = cleanText(
+      data?.name || address.aerodrome || address.amenity || address.road || address.suburb ||
+        address.city || address.town || String(data?.display_name || "").split(",")[0] || "Punto en el mapa",
+      120
+    );
     const payload = {
-      name,
-      display: data.display_name || name,
+      name: name || "Punto en el mapa",
+      display: cleanText(data?.display_name, 300) || name || "Punto en el mapa",
       source: "nominatim"
     };
     cacheSet(key, payload, 30 * 60 * 1000);
-    return Response.json(payload, { headers: { "Cache-Control": "public, max-age=300" } });
+    return privateJson(payload);
   } catch {
-    return Response.json({ name: "Punto en el mapa", source: "map" });
+    return privateJson({ name: "Punto en el mapa", source: "map" });
   }
+}
+
+function cleanText(value, maxLength) {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
 }

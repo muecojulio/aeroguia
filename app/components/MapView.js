@@ -3,6 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
 export default function MapView({
   airport,
   pois,
@@ -113,14 +123,15 @@ export default function MapView({
     layers.markers.clearLayers();
     const visiblePois = filter === "all" ? pois : pois.filter((p) => p.category === filter);
     visiblePois.forEach((p) => {
+      const color = /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : "#1d4ed8";
       const icon = L.divIcon({
         className: "",
-        html: `<div class="map-pin" style="background:${p.color}">${p.emoji}</div>`,
+        html: `<div class="map-pin" style="background:${color}">${escapeHtml(p.emoji)}</div>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16]
       });
       const marker = L.marker([p.lat, p.lon], { icon }).bindPopup(
-        `<strong>${p.name}</strong><br/>${p.label || ""}`
+        `<strong>${escapeHtml(p.name)}</strong><br/>${escapeHtml(p.label || "")}`
       );
       marker.on("click", (ev) => {
         const cur = pickRef.current;
@@ -148,21 +159,17 @@ export default function MapView({
     list.forEach((a) => {
       const icon = L.divIcon({
         className: "",
-        html: `<div class="map-pin airport">${a.iata}</div>`,
+        html: `<div class="map-pin airport">${escapeHtml(a.iata)}</div>`,
         iconSize: [44, 28],
         iconAnchor: [22, 14]
       });
       const marker = L.marker([a.lat, a.lon], { icon, zIndexOffset: 400 }).bindPopup(
-        `<strong>${a.iata}</strong><br/>${a.name}`
+        `<strong>${escapeHtml(a.iata)}</strong><br/>${escapeHtml(a.name)}`
       );
       marker.on("click", (ev) => {
         L.DomEvent.stopPropagation(ev);
         const cur = pickRef.current;
-        if (cur.pickingOrigin && cur.onPickAirport) {
-          cur.onPickAirport(a);
-        } else if (cur.onPickAirport) {
-          cur.onPickAirport(a);
-        }
+        cur.onPickAirport?.(a);
       });
       marker.addTo(layers.airports);
     });
@@ -183,7 +190,7 @@ export default function MapView({
         fillOpacity: 1,
         weight: 3
       })
-        .bindPopup(`Inicio: ${origin.name}`)
+        .bindPopup(`Inicio: ${escapeHtml(origin.name)}`)
         .addTo(layers.extras);
     }
 
@@ -195,7 +202,7 @@ export default function MapView({
         fillOpacity: 1,
         weight: 3
       })
-        .bindPopup(`Destino: ${destination.name}`)
+        .bindPopup(`Destino: ${escapeHtml(destination.name)}`)
         .addTo(layers.extras);
     }
 
@@ -206,14 +213,16 @@ export default function MapView({
     }
 
     (flights || []).forEach((f) => {
+      if (!Number.isFinite(f.lat) || !Number.isFinite(f.lon)) return;
+      const heading = Number.isFinite(f.heading) ? f.heading : 0;
       const icon = L.divIcon({
         className: "",
-        html: `<div style="transform:rotate(${f.heading || 0}deg);font-size:16px">✈️</div>`,
+        html: `<div style="transform:rotate(${heading}deg);font-size:16px">✈️</div>`,
         iconSize: [18, 18],
         iconAnchor: [9, 9]
       });
       L.marker([f.lat, f.lon], { icon })
-        .bindPopup(`<strong>${f.callsign || "Vuelo"}</strong>`)
+        .bindPopup(`<strong>${escapeHtml(f.callsign || "Vuelo")}</strong>`)
         .addTo(layers.extras);
     });
   }, [ready, origin, destination, routeGeo, flights]);
